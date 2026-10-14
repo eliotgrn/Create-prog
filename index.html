@@ -176,6 +176,8 @@ h3.alt{font-family:var(--display);font-size:18px;margin:8px 0 0}
 .altb.used{opacity:.6}
 .altb em{font-size:12px;color:var(--mute)}
 body.noscroll{overflow:hidden}
+.bdg{font-size:12px;font-weight:700;color:#0F766E;text-decoration:none}
+.go.bl{display:flex;align-items:center;justify-content:center;text-decoration:none}
 @media (max-width:640px){.wkg{grid-template-columns:minmax(0,1fr);overflow:visible}.wkd{flex-direction:row;flex-wrap:wrap;align-items:flex-start;border-top:1px solid var(--line);padding-top:6px}.wkd>b{width:34px;text-align:left;padding-top:8px}.wkd .stb{flex:0 1 auto}.addw{flex-direction:row;flex-wrap:wrap;align-items:flex-start}.addw .menu{flex-direction:row;flex-wrap:wrap;width:auto}}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){.doc tr.pp td,.doc tr.tb td,.doc tr.ten td,.doc tr.pm td{background:transparent}}}
 @media print{.top,.noprint,#sheet,.wa,.crumb{display:none!important} body{background:#fff;color:#000} main{padding:0;max-width:none} details{border:none} .doc summary::before{content:""} .tw{overflow:visible} h4{break-after:avoid} table{break-inside:auto} tr{break-inside:avoid} .frise{min-width:0!important}}
@@ -428,6 +430,72 @@ function candidats(w, k, j, refW, faibles, zones, crois){
 
 if(false&&typeof module!=="undefined") module.exports = {generer, candidats, niveauDe, KINDS, CLASSEMENTS, ageAt, pd, iso, monday};
 
+/* ===== MiniPDF : vrai fichier PDF fabriqué sur l'appareil, sans bibliothèque (Helvetica, A4) ===== */
+const MiniPDF = (()=>{
+  const CP = {"€":128,"‚":130,"ƒ":131,"„":132,"…":133,"†":134,"‡":135,"ˆ":136,"‰":137,"Š":138,"‹":139,"Œ":140,"Ž":142,"‘":145,"’":146,"“":147,"”":148,"•":149,"–":150,"—":151,"˜":152,"™":153,"š":154,"›":155,"œ":156,"ž":158,"Ÿ":159};
+  const SUB = {"→":"->","←":"<-","≤":"<=","≥":">=","✓":"OK","★":"*","ⓘ":"i","✎":""," ":" "," ":" ","‑":"-","≈":"~","×":"×","…":"…","Δ":"D","°":"°"};
+  function enc(s){ let o=""; for(const ch of String(s??"")){ let c=ch; if(c.charCodeAt(0)>255 && !(c in CP) && SUB[c]!=null) c=SUB[c]; for(const k of c){ const n=k.charCodeAt(0); if(n<256) o+=k; else if(CP[k]) o+=String.fromCharCode(CP[k]); else o+="?"; } } return o.replace(/\\/g,"\\\\").replace(/\(/g,"\\(").replace(/\)/g,"\\)"); }
+  let ctx=null;
+  function width(s,size,bold){ if(!ctx){ ctx=document.createElement("canvas").getContext("2d"); } ctx.font=(bold?"bold ":"")+"100px Helvetica, Arial, sans-serif"; return ctx.measureText(String(s)).width/100*size*1.02; }
+  function hex(c){ const m=/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(c||"#000000"); return m?[1,2,3].map(i=>(parseInt(m[i],16)/255).toFixed(3)).join(" "):"0 0 0"; }
+  class Doc{
+    constructor(opt={}){ this.W=opt.landscape?842:595; this.H=opt.landscape?595:842; this.M=opt.margin||36; this.pages=[]; this.addPage(); }
+    addPage(){ this.cur=[]; this.pages.push(this.cur); this.y=this.M; return this; }
+    text(x,y,s,o={}){ const sz=o.size||10; this.cur.push(`BT /${o.bold?"F2":"F1"} ${sz} Tf ${hex(o.color)} rg ${x.toFixed(2)} ${(this.H-y-sz*0.8).toFixed(2)} Td (${enc(s)}) Tj ET`); }
+    rect(x,y,w,h,o={}){ const c=[]; if(o.fill) c.push(hex(o.fill)+" rg"); if(o.stroke) c.push(hex(o.stroke)+" RG "+(o.lw||0.6)+" w"); c.push(`${x.toFixed(2)} ${(this.H-y-h).toFixed(2)} ${w.toFixed(2)} ${h.toFixed(2)} re ${o.fill&&o.stroke?"B":o.fill?"f":"S"}`); this.cur.push(c.join(" ")); }
+    line(x1,y1,x2,y2,o={}){ this.cur.push(`${hex(o.color||"#C8CDD4")} RG ${o.lw||0.6} w ${x1.toFixed(2)} ${(this.H-y1).toFixed(2)} m ${x2.toFixed(2)} ${(this.H-y2).toFixed(2)} l S`); }
+    wrap(s,size,maxw,bold){ const out=[]; for(const para of String(s??"").split("\n")){ let line=""; for(const w of para.split(/\s+/)){ if(!w) continue; const t=line?line+" "+w:w; if(width(t,size,bold)<=maxw||!line) line=t; else { out.push(line); line=w; } } out.push(line); } return out; }
+    need(h){ if(this.y+h>this.H-this.M) { this.addPage(); return true; } return false; }
+    /* paragraphe avec retour à la ligne et saut de page automatique */
+    para(s,o={}){ const sz=o.size||10, lh=sz*(o.lh||1.3), x=o.x??this.M, w=o.w??(this.W-this.M-x); for(const l of this.wrap(s,sz,w,o.bold)){ this.need(lh); this.text(x,this.y,l,o); this.y+=lh; } this.y+=o.after??2; }
+    out(){
+      const objs=[]; const add=s=>{ objs.push(s); return objs.length; };
+      add("<< /Type /Catalog /Pages 2 0 R >>"); add("PAGES");
+      add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
+      add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>");
+      const kids=[];
+      for(const p of this.pages){ const st=p.join("\n"); const c=add(`<< /Length ${st.length} >>\nstream\n${st}\nendstream`); kids.push(add(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${this.W} ${this.H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${c} 0 R >>`)); }
+      objs[1]=`<< /Type /Pages /Kids [${kids.map(k=>k+" 0 R").join(" ")}] /Count ${kids.length} >>`;
+      let s="%PDF-1.4\n%\xE2\xE3\xCF\xD3\n"; const off=[];
+      objs.forEach((o,i)=>{ off.push(s.length); s+=`${i+1} 0 obj\n${o}\nendobj\n`; });
+      const x=s.length; s+=`xref\n0 ${objs.length+1}\n0000000000 65535 f \n`+off.map(o=>String(o).padStart(10,"0")+" 00000 n \n").join("")+`trailer\n<< /Size ${objs.length+1} /Root 1 0 R >>\nstartxref\n${x}\n%%EOF`;
+      const b=new Uint8Array(s.length); for(let i=0;i<s.length;i++) b[i]=s.charCodeAt(i)&255; return new Blob([b],{type:"application/pdf"});
+    }
+  }
+  /* remise du fichier : feuille de partage (Imprimer, Enregistrer dans Fichiers…) sinon téléchargement */
+  async function deliver(blob,name){
+    const file=new File([blob],name,{type:"application/pdf"});
+    try{ if(navigator.canShare && navigator.canShare({files:[file]})){ await navigator.share({files:[file],title:name}); return "share"; } }catch(e){ if(e && e.name==="AbortError") return "abort"; }
+    const u=URL.createObjectURL(blob), a=document.createElement("a"); a.href=u; a.download=name; a.rel="noopener"; document.body.appendChild(a); a.click(); a.remove();
+    return "download";
+  }
+  return {Doc, deliver, width};
+})();
+
+/* ===== PARTAGE PAR LIEN : l'objet voyage dans l'adresse (#x/…), compressé quand l'appareil le permet ===== */
+const Partage = (()=>{
+  const toB64=u8=>{ let s=""; for(let i=0;i<u8.length;i+=0x8000) s+=String.fromCharCode.apply(null,u8.subarray(i,i+0x8000)); return btoa(s).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); };
+  const fromB64=s=>{ const b=atob(s.replace(/-/g,"+").replace(/_/g,"/")); const u=new Uint8Array(b.length); for(let i=0;i<b.length;i++) u[i]=b.charCodeAt(i); return u; };
+  async function pipe(u8,T){ const st=new Blob([u8]).stream().pipeThrough(T); return new Uint8Array(await new Response(st).arrayBuffer()); }
+  async function enc(obj){
+    const raw=new TextEncoder().encode(JSON.stringify(obj));
+    try{ if(window.CompressionStream) return "z"+toB64(await pipe(raw,new CompressionStream("deflate-raw"))); }catch(e){}
+    return "p"+toB64(raw);
+  }
+  async function dec(code){
+    const k=code[0], u=fromB64(code.slice(1));
+    const raw = k==="z" ? await pipe(u,new DecompressionStream("deflate-raw")) : u;
+    return JSON.parse(new TextDecoder().decode(raw));
+  }
+  async function envoyer(obj,titre,texte,openSheet,esc){
+    const url=location.origin+location.pathname+"#x/"+await enc(obj);
+    try{ if(navigator.share){ await navigator.share({title:titre,text:texte,url}); return; } }catch(e){ if(e&&e.name==="AbortError") return; }
+    let ok=false; try{ await navigator.clipboard.writeText(url); ok=true; }catch(e){}
+    openSheet(`<div class="shh"><b>${esc(titre)}</b><button class="ib" data-close type="button">×</button></div><p class="msg">${ok?"Lien copié. ":""}Colle ce lien dans un message : il ouvre directement la même chose sur le téléphone de la personne.</p><textarea class="srch" rows="5" readonly>${esc(url)}</textarea>`);
+  }
+  return {enc,dec,envoyer};
+})();
+
 /* ===== INTERFACE ===== */
 const PK = "programmation_v1", JK = "grilles_joueurs_v1";
 let DATA = null;
@@ -624,18 +692,21 @@ function showEdit(pid){
 }
 
 /* ---------- PLAN ---------- */
-let CUR=null;
+let CUR=null, BUILT=new Map();
+const SEANCES_URL="../Seances-/";
 function showPlan(pid, hint){
   const p=getPlan(pid); if(!p){ main.innerHTML=`<div class="empty">Plan introuvable.</div>`; return; }
   const j=getJ(p.jid)||{nom:"Joueur supprimé", sexe:"F"}, P=prof(p.jid);
   const R=generer(p, j, P, DATA); CUR={p,R,j};
+  try{ const C=load("programmation_cache_v1",{}); C[p.id]={nom:p.nom,jid:p.jid,debut:p.debut,fin:p.fin,W:R.W.map(w=>({i:w.i,d1:w.d1,lab:fd(w.d1)+" → "+fd(w.d7),ph:w.ph,mi:w.mi,ses:w.ses.map(s=>({key:s.key,j:s.j,k:s.k,t:s.t,l:s.l}))}))}; localStorage.setItem("programmation_cache_v1",JSON.stringify(C)); }catch(e){}
+  BUILT = new Map((load("seances_v1",{seances:[]}).seances||[]).filter(s=>s.src?.plan===p.id).map(s=>[s.src.key,s.id]));
   const lvl=R.decoupe;
   const nbS=R.W.reduce((s,w)=>s+w.ses.length,0);
   const comps=p.compets.length+p.objs.length;
   main.innerHTML = `
   <div class="crumb"><a href="#">Accueil</a> › <a href="#j/${p.jid}">${esc(j.nom)}</a> › Plan</div>
   <div class="dochead"><div><h1>${esc(p.nom||"Plan")}</h1><p class="lead">${esc(j.nom)} · ${R.sexe==="G"?"garçon":"fille"} ${R.age} ans · ${esc(P.classement)} (${NIVN[R.niv].toLowerCase()}) · ${fdy(pd(p.debut))} → ${fdy(pd(p.fin))}</p></div>
-   <div class="acts noprint"><a class="ib" href="#e/${p.id}">Modifier les données</a><button class="ib" id="prt" type="button">Imprimer / PDF</button></div></div>
+   <div class="acts noprint"><a class="ib" href="#e/${p.id}">Modifier les données</a><button class="ib" id="prt" type="button">Imprimer / PDF</button><button class="ib" id="snd" type="button">📲 Envoyer</button></div></div>
   <div class="doc">
   <div class="ess"><h2>L'essentiel</h2>
    <p>${R.N} semaine${R.N>1?"s":""} · ${nbS} séances · ${lvl==="macro"?R.macros.length+" macrocycles, "+R.mesos.length+" mésocycles":lvl==="meso"?R.mesos.length+" mésocycles":"microcycles et séances"} · charge maximale ${R.cap}/5${R.crois?" (croissance)":""}${comps?"":" · aucune compétition rentrée"}.</p>
@@ -649,13 +720,62 @@ function showPlan(pid, hint){
   <h2>Semaines</h2>
   ${lvl==="micro" ? R.W.map(weekHtml).join("") : R.mesos.map((m,q)=>`<details${!hint&&q===openM(R)?" open":""} data-m="${m.a}"><summary>${esc(m.nom)} <small class="sm2">${fd(R.W[m.a].d1)} → ${fd(R.W[m.b].d7)}</small></summary>${R.W.slice(m.a,m.b+1).map(weekHtml).join("")}</details>`).join("")}
   </div>`;
-  $("#prt").onclick=()=>{ $$("details").forEach(d=>d.open=true); setTimeout(()=>window.print(),50); };
+  $("#prt").onclick=()=>pdfPlan();
+  $("#snd").onclick=()=>{ const o=JSON.parse(JSON.stringify(p)); delete o.id; Partage.envoyer({v:1,p:o,j:{nom:j.nom,sexe:j.sexe,naissance:j.naissance||""},pr:P},"Plan : "+(p.nom||"plan"),`Plan « ${p.nom||""} » de ${j.nom} : ouvre ce lien.`,openSheet,esc); };
   $$(".theme").forEach(b=>b.onclick=()=>themeSheet(b.dataset.w, b.dataset.s));
   $$("[data-wed]").forEach(b=>b.onclick=()=>weekSheet(+b.dataset.wed));
   $$(".frise [data-w]").forEach(a=>a.addEventListener("click",e=>{ e.preventDefault(); goWeek(+a.dataset.w); }));
   if(hint && /^w\d+$/.test(hint)) goWeek(+hint.slice(1));
 }
 function openM(R){ const t=Date.UTC(new Date().getFullYear(),new Date().getMonth(),new Date().getDate()); const q=R.mesos.findIndex(m=>t>=R.W[m.a].d1&&t<=R.W[m.b].d7); return q<0?0:q; }
+async function pdfPlan(){
+  const b=$("#prt"); b.textContent="Préparation…";
+  try{
+  const {p,R,j}=CUR, P=prof(p.jid), d=new MiniPDF.Doc(), M=d.M, W=d.W-2*M;
+  const KC={pp:"#C2410C",tb:"#1D4ED8",ten:"#475569",pm:"#7C3AED"};
+  d.para(p.nom||"Plan",{size:18,bold:true,after:4});
+  d.para(`${j.nom} · ${R.sexe==="G"?"garçon":"fille"} ${R.age} ans · ${P.classement} (${NIVN[R.niv].toLowerCase()}) · ${fdy(pd(p.debut))} -> ${fdy(pd(p.fin))}`,{size:10,color:"#5D6675"});
+  const nbS=R.W.reduce((s,w)=>s+w.ses.length,0);
+  d.para(`${R.N} semaines · ${nbS} séances · ${R.decoupe==="macro"?R.macros.length+" macrocycles, "+R.mesos.length+" mésocycles":R.decoupe==="meso"?R.mesos.length+" mésocycles":"microcycles et séances"} · charge maximale ${R.cap}/5${R.crois?" (croissance)":""}`,{size:10,after:8});
+  // frise
+  const cw=W/R.N, top=d.y, hb=50; let y0=top;
+  if(R.decoupe==="macro"){ R.macros.forEach((m,q)=>{ d.rect(M+m.a*cw+0.5,y0,(m.b-m.a+1)*cw-1,13,{fill:q%2?"#334155":"#16202E"}); if((m.b-m.a+1)*cw>40) d.text(M+m.a*cw+3,y0+2.5,m.id,{size:7.5,bold:true,color:"#FFFFFF"}); }); y0+=16; }
+  R.mesos.forEach(m=>{ d.rect(M+m.a*cw+0.5,y0,(m.b-m.a+1)*cw-1,12,{fill:PHC[m.t]}); });
+  y0+=15;
+  R.W.forEach(w=>{ const x=M+w.i*cw; if(w.comp.length||w.obj.length) d.rect(x,y0,cw,hb,{fill:"#FDECEC"}); if(w.off) d.rect(x,y0,cw,hb,{fill:"#EEF0F3"}); const h=w.c*hb/5.2; if(h>0) d.rect(x+cw*0.15,y0+hb-h,cw*0.7,h,{fill:PHC[w.ph]}); if(w.obj.length) d.text(x+cw/2-2.5,y0+hb-h-9,"*",{size:9,bold:true,color:"#B91C1C"}); });
+  d.line(M,y0+hb,M+W,y0+hb);
+  R.W.forEach(w=>{ const dt=new Date(w.d1); if(w.i===0||dt.getUTCDate()<=7) d.text(M+w.i*cw,y0+hb+3,MOIS[dt.getUTCMonth()],{size:6.5,color:"#5D6675"}); });
+  d.y=y0+hb+14;
+  let lx=M; for(const [k,n] of Object.entries(PHN)){ d.rect(lx,d.y+1,7,7,{fill:PHC[k]}); d.text(lx+10,d.y,n,{size:7.5,color:"#333333"}); lx+=14+MiniPDF.width(n,7.5); } d.y+=16;
+  if(R.faibles.length) d.para("Lignes prioritaires : "+R.faibles.join(" "),{size:9.5});
+  const vig=[...R.zones.map(z=>ZONES[z].v),...(R.crois?["Pic de croissance : charge plafonnée plus bas, pas de sauts en profondeur ni de charge lourde."]:[]),...(R.REF?.vig||[])].slice(0,5);
+  if(vig.length){ d.para("Vigilance",{size:11,bold:true,after:1}); vig.forEach(v=>d.para("• "+v,{size:9,x:M+6})); }
+  d.y+=6;
+  if(R.decoupe==="macro"){ d.para("Macrocycles",{size:13,bold:true,after:3}); R.macros.forEach(m=>d.para(`${m.id} · ${m.nom} · ${fd(R.W[m.a].d1)} -> ${fd(R.W[m.b].d7)} (${m.b-m.a+1} sem.) : ${m.obj}`,{size:9.5})); d.y+=6; }
+  if(R.decoupe!=="micro"){ d.para("Mésocycles",{size:13,bold:true,after:3});
+    R.mesos.forEach(m=>{ d.need(30); d.rect(M,d.y+1,4,10,{fill:PHC[m.t]}); d.para(`${m.nom} · ${fd(R.W[m.a].d1)} -> ${fd(R.W[m.b].d7)} (${m.b-m.a+1} sem.)`,{size:10,bold:true,x:M+8,after:0});
+      if(m.t!=="T"&&m.ref) [["PP","PP"],["GE","Geste"],["DE","Dépl."],["TEN","Tennis"],["PM","Mental"]].filter(([k])=>m.ref[k]).forEach(([k,n])=>d.para(n+" : "+m.ref[k],{size:8.5,color:"#333333",x:M+8,after:0}));
+      d.y+=5; }); }
+  d.addPage(); d.para("Semaines",{size:15,bold:true,after:6});
+  for(const w of R.W){
+    d.need(36);
+    d.rect(M,d.y,W,16,{fill:"#ECEFF3"}); d.rect(M,d.y,4,16,{fill:PHC[w.ph]});
+    d.text(M+9,d.y+3.5,`S${w.i+1} · ${fd(w.d1)} -> ${fd(w.d7)} · ${w.mi} · charge ${w.c}/5`,{size:10,bold:true});
+    const fl=[w.obj.length?"Objectif : "+w.obj.join(", "):"",w.comp.length&&!w.obj.length?[...new Set(w.comp)].join(", "):"",w.bil?"Bilan":"",w.off?"Coupure":""].filter(Boolean).join(" · ");
+    if(fl) d.text(M+W-6-MiniPDF.width(fl,8.5,true),d.y+4,fl,{size:8.5,bold:true,color:"#B91C1C"});
+    d.y+=20;
+    if(w.off){ d.para("Semaine sans entraînement : repos et activités libres.",{size:9,color:"#5D6675",x:M+8}); }
+    for(const s of w.ses){ const lab=JC[s.j]+" · "+KINDS[s.k].n.replace("Tennis individuel (biomécanique)","Tennis indiv"); const lw=118;
+      const lines=d.wrap(s.t+(s.l?.length?"  ["+s.l.join(" ")+"]":""),9,W-lw-8);
+      d.need(lines.length*11.5+2); d.text(M+8,d.y,lab,{size:8.5,bold:true,color:KC[KINDS[s.k].c]});
+      lines.forEach((l,i)=>d.text(M+lw,d.y+i*11.5,l,{size:9})); d.y+=lines.length*11.5+2.5; }
+    d.y+=6;
+  }
+  const r=await MiniPDF.deliver(d.out(),`Plan ${j.nom} ${(p.nom||"").replace(/[\\/:*?"<>|]/g,"")}.pdf`.slice(0,90));
+  b.textContent=r==="download"?"PDF téléchargé":"Imprimer / PDF";
+  }catch(e){ b.textContent="Erreur PDF"; console.error(e); }
+  setTimeout(()=>{ const x=$("#prt"); if(x) x.textContent="Imprimer / PDF"; },2500);
+}
 function goWeek(i){ const h=$("#w"+i); if(!h) return; const d=h.closest("details"); if(d) d.open=true; h.scrollIntoView({block:"start"}); h.classList.add("flash"); setTimeout(()=>h.classList.remove("flash"),1700); }
 function weekHtml(w){
   const ch = `<span class="chg">${[1,2,3,4,5].map(k=>`<b class="${k<=w.c?"on":""}"></b>`).join("")}</span>`;
@@ -664,7 +784,7 @@ function weekHtml(w){
   return `<h4 id="w${w.i}">S${w.i+1} · ${fd(w.d1)} → ${fd(w.d7)} <span class="mic" style="--c:${PHC[w.ph]}">${w.mi}</span>${ch}</h4>
   ${fl?`<p class="wf">${fl}</p>`:""}
   ${w.off?`<p class="off">Semaine sans entraînement : repos et activités libres.${ov==="off"?"":""}</p>`:
-    w.ses.length?`<div class="tw"><table class="wk">${w.ses.map((s,si)=>`<tr class="${KINDS[s.k].c}"><td class="sl">${JC[s.j]}<br><small>${KINDS[s.k].n.replace("Tennis individuel (biomécanique)","Tennis indiv · biomécanique")}</small></td><td><button type="button" class="theme${s.edit?" ed":""}" data-w="${w.i}" data-s="${si}">${esc(s.t)}</button>${s.l?.length?`<div>${s.l.map(chip).join("")}</div>`:""}</td></tr>`).join("")}</table></div>`:`<p class="off">Aucune séance cette semaine.</p>`}
+    w.ses.length?`<div class="tw"><table class="wk">${w.ses.map((s,si)=>`<tr class="${KINDS[s.k].c}"><td class="sl">${JC[s.j]}<br><small>${KINDS[s.k].n.replace("Tennis individuel (biomécanique)","Tennis indiv · biomécanique")}</small></td><td><button type="button" class="theme${s.edit?" ed":""}" data-w="${w.i}" data-s="${si}">${esc(s.t)}</button>${s.l?.length?`<div>${s.l.map(chip).join("")}</div>`:""}${BUILT.has(s.key)?`<div><a class="bdg noprint" href="${SEANCES_URL}#s/${BUILT.get(s.key)}">✓ séance construite</a></div>`:""}</td></tr>`).join("")}</table></div>`:`<p class="off">Aucune séance cette semaine.</p>`}
   <p class="noprint wa"><button type="button" class="lnk" data-wed="${w.i}">Modifier cette semaine${ov?" (modifiée)":""}</button></p>`;
 }
 function frise(R){
@@ -703,6 +823,7 @@ function themeSheet(wi, si){
   openSheet(`<div class="shh"><b>${JOURS[s.j]} · ${KINDS[s.k].n}</b><button class="ib" data-close type="button" aria-label="Fermer">×</button></div>
    <p class="msg">S${w.i+1} · ${w.mi} · ${PHN[w.ph]}</p>
    <div class="f"><label for="tt">Thème de la séance</label><textarea id="tt" rows="3">${esc(s.t)}</textarea></div>
+   <a class="go big bl" href="${SEANCES_URL}#p/${p.id}/${encodeURIComponent(s.key)}">${BUILT.has(s.key)?"Ouvrir la séance construite":"Construire cette séance"} →</a>
    <div class="tools"><button class="go" id="tok" type="button">Enregistrer</button>${s.edit?`<button class="ib" id="tre" type="button">Revenir au thème de la méthode</button>`:""}</div>
    <h3 class="alt">Autres thèmes qui conviennent</h3>
    <div class="alts">${pool.map((x,i)=>`<button type="button" class="altb${usedT.has(x.t)?" used":""}" data-a="${i}">${esc(x.t)}<span>${x.l.map(chip).join("")}${usedT.has(x.t)?" <em>déjà dans le plan</em>":""}${x.age?` <em>repris des ${x.age} ans</em>`:""}</span></button>`).join("")}</div>`);
@@ -741,10 +862,21 @@ function showMethode(){
   <h2>Choix des thèmes</h2><ul><li>Pour chaque séance, l'appli cherche dans la saison de référence les semaines de même phase, même microcycle et même période de l'année.</li><li>Elle privilégie les thèmes qui touchent les lignes prioritaires (bilan Grilles et lignes cochées).</li><li>Elle écarte les thèmes à risque pour les zones fragiles et en pic de croissance.</li><li>Pas deux fois le même thème dans un plan tant qu'il en reste d'autres.</li><li>Tu peux toucher n'importe quel thème pour le réécrire ou choisir parmi d'autres thèmes qui conviennent ; tes retouches sont gardées quand le plan se recalcule.</li></ul></div>`;
 }
 
+/* ---------- PLAN REÇU PAR LIEN ---------- */
+async function recevoir(code){
+  try{ const d=await Partage.dec(code); const J=joueurs();
+    let j=J.joueurs.find(x=>x.nom===d.j.nom && (x.naissance||"")===d.j.naissance);
+    if(!j){ j={id:uid(),nom:d.j.nom,sexe:d.j.sexe,naissance:d.j.naissance,groupe:"",notes:"",bilans:[]}; J.joueurs.push(j); saveJoueurs(J); }
+    if(!ST.profils[j.id]) ST.profils[j.id]=d.pr||{classement:"NC",croissance:false,zones:[],prio:[]};
+    const p=d.p; p.id=uid(); p.jid=j.id; p.maj=todayIso(); ST.plans.push(p); saveNow(); location.replace("#p/"+p.id); }
+  catch(e){ main.innerHTML=`<div class="empty">Ce lien de plan est abîmé. Demande qu'on te le renvoie.</div>`; }
+}
+
 /* ---------- ROUTAGE ---------- */
 function route(){
   const h=decodeURIComponent(location.hash.slice(1)); const [a,b,c]=h.split("/");
   closeSheet();
+  if(a==="x"&&b){ recevoir(b); return; }
   if(a==="j"&&b) showJoueur(b); else if(a==="e"&&b) showEdit(b); else if(a==="p"&&b) showPlan(b,c); else if(a==="m") showMethode(); else showHome();
   if(!c) window.scrollTo(0,0);
   $("#back").style.visibility = a ? "visible" : "hidden";
